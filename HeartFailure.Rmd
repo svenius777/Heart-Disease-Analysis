@@ -1,0 +1,368 @@
+---
+title: "Analiza Srčanih Bolesti"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Opis skupa podataka
+
+Odabran je skup podataka za analizu zvan Heart Failure Prediction sa web stranice https://www.kaggle.com/datasets/andrewmvd/heart-failure-clinical-data?resource=download.
+
+Skup može predvidjeti hoće li pacijent preživjeti na temelju varijabli koje predstavljaju razne srčane bolesti. Skup se sastoji od dvanaest varijabli. Opišimo ih u nastavku.
+
+age - starost pacijenta  
+anaemia - manjak crvenih krvnih stanica (hemoglobin) kao boolean vrijednost  
+creatinine_phosphokinase - nivo CPK enzima u krvi (mcg/L)  
+diabetes - boolean vrijednost ako pacijent ima dijabetes ili ne  
+ejection_fraction - postotak krvi koja "bježi" iz srca svakim otkucajem  
+high_blood_pressure - boolean vrijednost ima li pacijent hipertenziju (povišen krvni tlak)  
+platelets - količina trombocita u krvi (kiloplatelets/mL)  
+serum_creatinine - količina seruma kreatinina u krvi (mEq/L)  
+serum_sodium - količina serum natrija u krvi (mEq/L)
+sex - spol pacijenta  
+smoking - puši li pacijent ili ne (boolean)  
+time - razdoblje praćenja, vrijeme nakon kojeg je provedena kontrola pacijenta nakon što otpušten iz bolnice  
+DEATH_EVENT - ako je pacijent preminuo tijekom razdoblja praćenja (boolean)  
+
+
+## Istraživačka analiza podataka
+
+Istraživačka analiza podataka je preliminarno istraživanje podataka da bi se bolje razumjele njihove karakteristike ili analiza na temlju vizalizacije. Probajmo vizualizirati naš dataset. Učitajmo naš dataset.
+```{r}
+  library(ggplot2)
+  dataset=read.csv("C:/FAKS/IS2/HeartFailureSeminar/heart_failure.csv")
+```
+
+Istražimo naš dataset kroz razne grafove.
+
+Najprije ćemo prikazati graf koji na osi x prikazuje godine pacijenta, a na osi y varijablu time koja predstavlja koliko se često prati pacijent. Što je time manji to se pacijent češće prati odnosno pregledava.
+```{r}
+  ggplot(dataset, aes(x=age,y=time)) + geom_col(fill='blue')
+```
+Vidimo da uglavnom postoji pravilnost što je pacijent stariji to je time manji što znači da se pacijent češće prati. To ima smisla budući da su stariji pacijenti uglavnom zdravstveno ugroženiji nego mlađi pacijenti.
+
+
+Pogledajmo zatim histogram koji će nam prebrojati koliko ima pacijenata određenih godina.
+```{r}
+  ggplot(dataset, aes(x=age)) + geom_histogram()
+```
+Vidimo da najviše srčanih bolesnika ima oko šezdesetih godina života.
+
+
+Količina natrija u serumu po godinama
+```{r}
+  ggplot(dataset, aes(x=age,y=serum_sodium)) + geom_col(fill='blue')
+```
+
+Količina kreatinina u serumu po godinama
+```{r}
+  ggplot(dataset, aes(x=age,y=serum_creatinine)) + geom_col(fill='blue')
+```
+
+Količina kreatina kinaze po godinama
+```{r}
+  ggplot(dataset, aes(x=age,y=creatinine_phosphokinase)) + geom_col(fill='blue')
+```
+
+
+## Priprema podataka za analizu
+
+Prije pripreme podataka potrebno ih je najprije učitati. To radimo putem read.csv() funkcije.
+```{r}
+  dataset=read.csv("C:/FAKS/IS2/HeartFailureSeminar/heart_failure.csv")
+```
+
+Pogledajmo dimenzije našeg dataset-a.
+```{r}
+  dim(dataset)
+```
+Vidimo da naš dataset ima 299 slučajeva i 13 atributa.
+
+
+Prikažimo zatim naš početni dataset.  
+
+![Početni dataset](C:/FAKS/IS2/HeartFailureSeminar/pocetni_dataset.png)
+
+Obratimo pozornost na boolean stupce odnosno varijable. One sadrže vrijednosti 0 i vrijednosti 1. To nam ne paše kada gradimo model stabla odlučivanja jer kao izlaz želimo dobiti "yes" ili "no" vrijednost. Također, kada želimo grafički prikazati stablo odlučivanja, bolje se vidi nakon što varijablu koju predviđamo pretvorimo iz boolean vrijednosti u stupac koji sadrži vrijednosti "yes" i "no".
+
+Sada želimo predvidjeti varijablu DEATH_EVENT koja nam govori ako je pacijent preminuo ili ne. Najprije je potrebno pretvoriti boolean vrijednosti varijable DEATH_EVENT u vrijednosti "yes" i "no". To radimo koristeći funkcije ifelse() i mutate().
+
+Učitavamo paket potreban za manipulaciju podataka (filter, arrange, mutate...)
+```{r}
+library(dplyr)
+```
+
+Pomoću ifelse() funkcije, varijablu DEATH_EVENT mijenjamo iz boolean vrijednosti 1 i 0 u vrijednosti "yes" i no. Ako se prepozna vrijednost 1, zapisuje "yes", inače "no". Zatim rezultat spremamo u varijablu DEATH_EVENT_2
+```{r}
+  DEATH_EVENT_2=ifelse(dataset$DEATH_EVENT==1, "Yes", "No")
+```
+
+Pomoću pipe operatora %>% i funkcije mutate() novostvorenu varijablu sa vrijednostima "yes" i "no" spremamo u varijablu DEATH_EVENT te spremamo izmjene u dataset.
+```{r}
+  dataset=dataset %>% mutate(DEATH_EVENT=DEATH_EVENT_2)
+```
+
+Prikažimo novodobiveni dataset.  
+![Izmijenjeni dataset](C:/FAKS/IS2/HeartFailureSeminar/promijenjeni_dataset.png)
+
+
+## Stabla odlučivanja
+
+Podijelimo sada skup na treniranje i testiranje. Postavit ćemo veličinu skupa za treniranje na 80%, a ostalo za skup za testiranje. Koristimo funkciju sample() kako bismo randomizirali podatke. Na kraju, na osnovu indeksa kreairamo skup za treniranje i testiranje.
+```{r}
+  n = nrow(dataset)
+  n_train=round(0.80*n)
+  set.seed(123)
+  train_indeksi <- sample(1:n, n_train)
+  dataset_train <- dataset[train_indeksi, ]  
+  dataset_test <- dataset[-train_indeksi, ]
+```
+
+Kako bismo izradili stablo odlučivanja, koristit ćemo biblioteku rpart te za iscrtavanje stabla koristimo rpart.plot().
+```{r}
+  library("rpart")
+  library("rpart.plot")
+```
+
+Trenirajmo model.Argument formula određuje prediktore i ciljnu varijablu. U ovom slučaju naša ciljna varijabla je DEATH_EVENT te na temelju svih ostalih varijabli predvidjeti DEATH_EVENT koji označava ako je pacijent preminuo ili ne tijekom razdoblja praćenja.
+```{r}
+  dataset_stablo_model = rpart(formula = DEATH_EVENT ~ .,
+                               data=dataset_train,
+                               method="class")
+```
+
+Naposlijetku, iscrtajmo stablo pomoću rpart.plot().
+```{r}
+  rpart.plot(x = dataset_stablo_model, yesno = 2, type = 0, extra = 0)
+```
+
+Iščitajmo značenje stabla. Ako je time >= 68  gleda se razina kreatinina u serumu. Ako je kreatinin u serumu serum_creatinine < 1.6 gledaju se godine. Ako je age < 79 stablo predviđa da pacijent nije preminuo. Također ako time nije veći ili jednak od 68, predviđa se da je pacijent preminuo.
+
+
+## Ridge regresija
+
+Za korištenje Ridge regresije potrebno je uključiti paket glmnet. Glavna funkcija paketa je glmnet() koja se koristi za treniranje modela. 
+
+Najprije ponovno učitavamo skup podataka, zatim u varijablu x koja predstavlja prediktore stavljamo cijeli skup podataka. U varijablu y spremamo ciljnu varijablu DEATH_EVENT.
+
+```{r}
+  library (ISLR)
+  dataset=read.csv("C:/FAKS/IS2/HeartFailureSeminar/heart_failure.csv")
+  x<-model.matrix(DEATH_EVENT ~.,dataset )[,-1]
+  y<-dataset$DEATH_EVENT
+```
+
+Funkcija glmnet() ima argument alpha koji određuje tip modela. Ako posatvimo alpha na 0 izvodit će se Ridge regresija. Funkcija glmnet() izvodi Ridge regresiju za unaprijed odabrani raspon lambda vrijednosti (grid). Zadajemo da se u grid vektoru lambda mijenja od 10^10^(null) do 10^-2^(least squares) te time pokrivajući raspon od null modela koji ne sadrži prediktore do modela dobivenog metodom najmanjih kvadrata.
+
+```{r}
+  library (glmnet)
+  grid =10^seq(10,-2, length=100)
+  ridge_model=glmnet(x, y, alpha=0, lambda=grid)
+```
+
+Uz svaku lambda vrijednost pridružen je vektor koeficijenata modela kojemu možemo pristupiti sa coeff(). U našem slučaju matrica ima 13 redaka (12 prediktora) i 100 stupaca (100 vrijednosti lambda).
+```{r}
+  dim(coef(ridge_model))
+```
+
+Ako se koristi velika vrijednost lambda procjene koeficijenata će biti znatno manje. Ako se koristi mala vrijednost lambda procjene koeficijenata će biti znatno veće. Prikažimo vrijednosti koeficijenta kada je lambda 50, dakle na sredini (jer imamo 100 vrijednosti lambda). Također prikažimo L2 norma. L2 norma vektora mjeri udaljenost procjene koeficijenta od nule. Kako lambda raste L2 norma se smanjuje.
+
+```{r}
+  cat("lambda:", ridge_model$lambda[50])
+  # Koeficijenti za 50. lambda, tj. lambda=11497
+  coef(ridge_model)[,50]
+  cat("L2 norma:", sqrt(sum(coef(ridge_model)[-1,50]^2)))
+```
+
+Za puno manji lambda, na primjer lambda=705, koeficijenti i L2 norma će biti sljedeći.
+```{r}
+  cat("lambda:", ridge_model$lambda[60])
+  cat("koeficijenti:")
+  coef(ridge_model)[,60]
+  cat("L2 norma:", sqrt(sum(coef(ridge_model)[-1,60]^2)))
+```
+
+Možemo iskoristiti predict() funkciju u kojoj direktno možemo unijeti vrijednost lambde kroz argument s.
+```{r}
+  predict(ridge_model,s=50,type="coefficients")[1:13,]
+```
+
+Razdijelimo podatke na skup za treniranje i testiranje kako bismo procijenili pogrešku Ridge modela.
+```{r}
+  set.seed(1)
+  train=sample(1:nrow(x), nrow(x)/2)
+  test=(-train)
+  y.test=y[test]
+```
+
+Na skupu za treniranje učimo Ridge regresiju i evaluiramo MSE pogrešku modela na skupu za testiranje uz lambda=4. Koristit ćemo funkciju predict() za predviđanje na podacima za testiranje tako da umjesto type="coefficient" stavimo newx=x[test, ].
+
+```{r}
+  ridge_model=glmnet(x[train,],y[train],alpha=0,lambda=grid, thresh=1e-12)
+  ridge.pred=predict(ridge_model,s=4,newx=x[test,])
+  mse_pogreska<-mean((ridge.pred-y.test)^2)
+  cat("MSE pogreška:", mse_pogreska)
+```
+
+Provjerimo sada da li je ridge regresija uz lambda=4 uspješnija od izvođenja metode najmanjih kvadrata (koja je zapravo Ridge regresija uz lambda=0).
+
+```{r}
+  ridge.pred=predict.glmnet (ridge_model ,s=0, newx=x[test ,])
+  mean((ridge.pred -y.test)^2)
+  lm(y~x, subset =train)
+  predict(ridge_model,s=0,type="coefficients") [1:13 ,]
+```
+Dobili smo manju pogrešku od 0.1260009 tako da je metoda najmanjih kvadrata u ovom slučaju uspješnija.
+
+Odaberimo najbolju lambdu korištenje unakrsne validacije za podeševanje parametra lambda. Koristit ćemo funkciju cv.glmnet().
+```{r}
+  set.seed(1)
+  cv.out=cv.glmnet(x[train,],y[train],alpha=0)
+  plot(cv.out)
+  bestlambda=cv.out$lambda.min
+  cat("najbolji lambda je:", bestlambda)
+```
+Vrijednost lambda za koju je pogreška najmanja iznosi 0.1110211. 
+
+Pogledajmo koliko iznosi MSE pogreška kada koristimo najbolju lambda vrijednost.
+```{r}
+  ridge.pred=predict(ridge_model,s=bestlambda,newx=x[test,])
+  cat("MSE pogreška kada koristimo bestlambda:", mean((ridge.pred-y.test)^2))
+```
+MSE pogreška kada koristimo najbolju lambda vrijednost iznosi 0.1282796. Vidimo da se pogreška smanjila.
+
+Sada ponovno treniramo model na cijelom skupu uzoraka uz najbolju lambda vrijednost koja je dobivena unakrsnom validacijom.
+```{r}
+out=glmnet(x,y,alpha=0)
+predict(out,type="coefficients",s=bestlambda)[1:13,]
+```
+Ni jedan koeficijent nije jednak nuli jer Ridge regresija ne izvodi selekciju prediktora.
+
+
+## Strojno učenje
+
+Želimo napraviti modele strojnog učenja koji predviđaju DEATH_EVENT.
+
+Prije nego što krenemo, moramo napraviti kratku predobradu našeg dataset-a. Potrebno je ciljnu varijablu DEATH_EVENT pretvoriti u faktor sa 2 nivoa. Ako to ne učinimo dobijemo sljedeću grešku.  
+
+![Greška](C:/FAKS/IS2/HeartFailureSeminar/error_faktor.PNG)
+
+To radimo pomoću funkcije mutate() i factor na sljedeći način.
+
+```{r}
+  dataset=read.csv("C:/FAKS/IS2/HeartFailureSeminar/heart_failure.csv")
+  
+  DEATH_EVENT_faktor=factor(dataset$DEATH_EVENT)
+  
+  library(dplyr)
+  dataset=dataset %>% mutate(DEATH_EVENT=DEATH_EVENT_faktor)
+```
+
+Nakon što je to gotovo, da bismo mogli procijeniti ako nam je model dobar podijelit ćemo dataset na dva skupa. Skup koji sadrži 80% podataka za treniranje te drugi skup od 20% podataka za testiranje. Kako bismo to napravili koristit ćemo funkciju createDataPartition() unutar paketa caret.
+
+```{r}
+  library(caret)
+  
+  validation_index<-createDataPartition(dataset$DEATH_EVENT, p =0.80, list = FALSE)
+  dataset_test<-dataset[-validation_index, ]
+  dataset_train<-dataset[validation_index, ]
+```
+
+### Evaluacija algoritama
+#### Postavljanje 10-fold cross validacije
+Ovaj postupak će podijeliti skup podataka na 10 dijelova (9 za treniranje i 1 za testiranje), a zatim će proći sve kombinacije tih skupova. Proces će se ponoviti 3 puta za svaki od 5 algoritama, s različitom podjelom podataka na 10 skupina kako bi se dobile preciznije procjene.
+```{r}
+  # Run algorithms using 10-fold cross validation
+  control<-trainControl(method = "cv", number = 10)
+  metric<-"Accuracy"
+```
+
+#### Izgradnja pet modela predviđanja
+Naš problem pokušati ćemo riješti korištenjem 5 različitih algoritama:
+
+1 - Linear Discriminant Analysis (LDA)  
+2 - Classification and Regression Trees (CART)  
+3 - k-Nearest Neighbors (kNN)  
+4 - Support Vector Machines (SVM) with a linear kernel  
+5 - Random Forest (RF)  
+
+LDA algoritam:
+```{r}
+  # Linear Discriminant Analysis (LDA)  
+  library(e1071)
+  set.seed(7)
+  fit.lda <- caret::train(DEATH_EVENT~., data=dataset_train, method="lda", metric=metric, trControl=control)
+```
+
+Nelinearni algoritam CART:
+```{r}
+  # Classification and Regression Trees (CART)
+  set.seed(7)
+  fit.cart <- caret::train(DEATH_EVENT~., data=dataset_train, method="rpart", metric=metric, trControl=control)
+```
+
+Nelinearni algoritam kNN:
+```{r}
+  # k-Nearest Neighbors (kNN)
+  set.seed(7)
+  fit.knn <- caret::train(DEATH_EVENT~., data=dataset_train, method="knn", metric=metric, trControl=control)
+  ```
+
+SVM algoritam:
+```{r}
+  library(kernlab)
+  # Support Vector Machines (SVM)
+  set.seed(7)
+  fit.svm <- caret::train(DEATH_EVENT~., data=dataset_train, method="svmRadial", metric=metric, trControl=control)
+```
+
+RF algoritam:
+```{r}
+  library(randomForest)
+  # Random Forest (RF)
+  set.seed(7)
+  fit.rf <- caret::train(DEATH_EVENT~., data=dataset_train, method="rf", metric=metric, trControl=control)
+```
+
+Odabir najboljeg modela
+
+Nakon što smo kreirali pet modela i procjenili točnost za svaki, sljedeći zadatak je bio usporediti modele i odabrati najtočnije.
+
+Da bi to učinili, napraviti ćemo popis korištenih modela i proslijediti ove rezultate funkciji sažetka "summary()" da bi dobili izlaz koji prikazuje točnost svakog klasifikatora kao i mnoge druge mjerne podatke, poput Kappe.
+
+```{r}
+  results <- resamples(list(lda=fit.lda,cart=fit.cart, knn=fit.knn, svm=fit.svm, rf=fit.rf))
+  summary(results)
+```
+
+Zatim kreirajmo graf rezultata evaluacije modela te usporedimo raspršenost i srednju točnost svakog modela.
+```{r}
+  dotplot(results)
+```
+
+Važno je napomenuti da postoji niz mjerenja točnosti za svaki algoritam, jer je svaki algoritam ocijenjen 10 puta (10 puta unakrsna validacija), zbog čega je trebalo usporediti srednje vrijednosti točnosti modela. Najtočniji model u ovom slučaju bio je RF, s obzirom da je imao najveću srednju točnost s najmanjom raspršenosti.
+
+Kappa statistika nam pokazuje koliko su se instance klasificirane klasifikatorom strojnog učenja podudarale s podacima označenima kao točnim. U osnovi što je kappa bliže 1 to je bolje.
+
+Budući da je RF identificiran kao najbolji model, prikazati ćemo summary samo za njega.
+
+```{r}
+  # Sažetak našeg najboljeg modela - RF
+  print(fit.rf)
+```
+
+Predviđanje
+```{r}
+  predictions<-predict(fit.rf, dataset_test)
+  confusionMatrix(predictions, dataset_test$DEATH_EVENT)
+```
+
+RF se pokazao kao najprecizniji model na skupu za treniranje, ali moramo odrediti točnost modela na skupu za testiranje da bi dobili neovisnu završnu provjeru ispravnosti najboljeg modela. Zadržali smo skup za testiranje za provjeru valjanosti u slučaju overfitinga.
+
+RF model je pokrenut izravno na skupu za testiranje, a rezultati su sažeti u matrici konfuzije. Točnost je 86%. 
